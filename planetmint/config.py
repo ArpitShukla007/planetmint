@@ -26,7 +26,7 @@ class Config(metaclass=Singleton):
         # _base_database_localmongodb.keys() because dicts are unordered.
         # I tried to configure
         self.log_config = DEFAULT_LOGGING_CONFIG
-        db = "tarantool_db"
+        db = "localmongodb"
         self.__private_database_keys_map = {  # TODO Check if it is working after removing 'name' field
             "tarantool_db": ("host", "port"),
             "localmongodb": ("host", "port", "name"),

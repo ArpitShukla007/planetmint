@@ -27,9 +27,9 @@ services:
     restart: always
   planetmint:
     depends_on:
-      #- mongodb
+      - mongodb
       - tendermint
-      - tarantool
+      # - tarantool
     build:
       context: .
       dockerfile: Dockerfile-dev
@@ -43,9 +43,9 @@ services:
       - ./pytest.ini:/usr/src/app/pytest.ini
       - ./tox.ini:/usr/src/app/tox.ini
     environment:
-      PLANETMINT_DATABASE_BACKEND: tarantool_db 
-      PLANETMINT_DATABASE_HOST: tarantool
-      PLANETMINT_DATABASE_PORT: 3303
+      PLANETMINT_DATABASE_BACKEND: localmongodb
+      PLANETMINT_DATABASE_HOST: mongodb
+      PLANETMINT_DATABASE_PORT: 27017
       PLANETMINT_SERVER_BIND: 0.0.0.0:9984
       PLANETMINT_WSSERVER_HOST: 0.0.0.0
       PLANETMINT_WSSERVER_ADVERTISED_HOST: planetmint
@@ -108,7 +108,7 @@ services:
       context: .
       dockerfile: Dockerfile-dev
       args:
-        backend: tarantool
+        backend: localmongodb
     volumes:
       - .:/usr/src/app/
     command: make -C docs/root html

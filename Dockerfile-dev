@@ -3,8 +3,6 @@ FROM python:${python_version}-slim
 LABEL maintainer "contact@ipdb.global"
 
 RUN apt-get update \
-    && apt-get install -y git zsh curl\
-    && apt-get install -y tarantool-common\
     && apt-get install -y vim build-essential cmake\
     && pip install -U pip \
     && apt-get autoremove \
@@ -17,7 +15,7 @@ ARG abci_status
 # to force stdin, stdout and stderr to be totally unbuffered and to capture logs/outputs
 ENV PYTHONUNBUFFERED 0
 
-ENV PLANETMINT_DATABASE_PORT 3303
+ENV PLANETMINT_DATABASE_PORT 27017
 ENV PLANETMINT_DATABASE_BACKEND $backend
 ENV PLANETMINT_SERVER_BIND 0.0.0.0:9984
 ENV PLANETMINT_WSSERVER_HOST 0.0.0.0
