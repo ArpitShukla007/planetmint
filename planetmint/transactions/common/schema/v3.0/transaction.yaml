@@ -40,7 +40,9 @@ properties:
     "$ref": "#/definitions/metadata"
   version:
     type: string
-    pattern: "^2\\.0$"
+    pattern: "^3\\.0$"
+  script:
+    "$ref": "#/definitions/script"
 definitions:
   offset:
     type: integer
@@ -71,16 +73,9 @@ definitions:
     - COMPOSE
     - DECOMPOSE
   asset:
-    type: object
-    additionalProperties: false
-    properties:
-      id:
-        "$ref": "#/definitions/sha3_hexdigest"
-      data:
-        anyOf:
-        - type: object
-          additionalProperties: true
-        - type: 'null'
+    anyOf:
+    - type: 'null'
+    - type: object
   output:
     type: object
     additionalProperties: false
@@ -137,9 +132,7 @@ definitions:
         - type: 'null'
   metadata:
     anyOf:
-    - type: object
-      additionalProperties: true
-      minProperties: 1
+    - type: string
     - type: 'null'
   condition_details:
     anyOf:
@@ -172,3 +165,55 @@ definitions:
           type: array
           items:
             "$ref": "#/definitions/condition_details"
+  script:
+    type: object
+    additionalProperties: false
+    required:
+      - code
+      - state
+      - input
+      - output
+    properties:
+      code:
+        anyOf:
+          - type: object
+            additionalProperties: false
+            required:
+              - type
+              - raw
+              - parameters
+            properties:
+              type:
+                type: string
+                enum:
+                  - zenroom
+              raw:
+                type: string
+              parameters:
+                type: array
+                items:
+                  type: object
+          - type: object
+            additionalProperties: false
+            required:
+              - transaction_id
+            properties:
+              transaction_id:
+                "$ref": "#/definitions/sha3_hexdigest"
+      state:
+        anyOf:
+          - type: object
+            "$ref": "#/definitions/sha3_hexdigest"
+      input:
+        type: object
+      output:
+        anyOf:
+          - type: object
+          - type: array
+      policies:
+        type: object
+        properties:
+          raw:
+            type: object
+          txids:
+            type: object

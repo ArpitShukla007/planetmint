@@ -34,8 +34,11 @@ from planetmint.transactions.common.exceptions import (
     InvalidSignature,
     AmountError,
     AssetIdMismatch,
+    DuplicateTransaction,
 )
-from planetmint.transactions.common.utils import serialize
+from planetmint.backend.schema import validate_language_key
+from planetmint.transactions.common.schema import validate_transaction_schema
+from planetmint.transactions.common.utils import serialize, validate_txn_obj, validate_key
 from .memoize import memoize_from_dict, memoize_to_dict
 from .input import Input
 from .output import Output
@@ -53,6 +56,10 @@ UnspentOutput = namedtuple(
         "condition_uri",
     ),
 )
+
+VALIDATOR_ELECTION = "VALIDATOR_ELECTION"
+CHAIN_MIGRATION_ELECTION = "CHAIN_MIGRATION_ELECTION"
+VOTE = "VOTE"
 
 
 class Transaction(object):
@@ -80,7 +87,13 @@ class Transaction(object):
 
     CREATE = "CREATE"
     TRANSFER = "TRANSFER"
+    VALIDATOR_ELECTION = VALIDATOR_ELECTION
+    CHAIN_MIGRATION_ELECTION = CHAIN_MIGRATION_ELECTION
+    VOTE = VOTE
     ALLOWED_OPERATIONS = (CREATE, TRANSFER)
+    ASSET = "asset"
+    METADATA = "metadata"
+    DATA = "data"
     VERSION = "2.0"
 
     def __init__(
@@ -93,6 +106,7 @@ class Transaction(object):
         version=None,
         hash_id=None,
         tx_dict=None,
+        script=None,
     ):
         """The constructor allows to create a customizable Transaction.
 
@@ -120,13 +134,25 @@ class Transaction(object):
         # Asset payloads for 'CREATE' operations must be None or
         # dicts holding a `data` property. Asset payloads for 'TRANSFER'
         # operations must be dicts holding an `id` property.
-        if operation == self.CREATE and asset is not None and not (isinstance(asset, dict) and "data" in asset):
-            raise TypeError(
-                (
-                    "`asset` must be None or a dict holding a `data` "
-                    " property instance for '{}' Transactions".format(operation)
+        if operation == self.CREATE and asset is not None:
+            if not isinstance(asset, dict):
+                raise TypeError(
+                    (
+                        "`asset` must be None or a dict holding a `data` "
+                        " property instance for '{}' Transactions".format(operation)
+                    )
                 )
-            )
+
+            if "data" in asset:
+                if asset["data"] is not None and not isinstance(asset["data"], str):
+                    # add check if data is ipld marshalled CID string
+                    raise TypeError(
+                        (
+                            "`asset` must be None or a dict holding a `data` "
+                            " property instance for '{}' Transactions".format(operation)
+                        )
+                    )
+
         elif operation == self.TRANSFER and not (isinstance(asset, dict) and "id" in asset):
             raise TypeError(("`asset` must be a dict holding an `id` property " "for 'TRANSFER' Transactions"))
 
@@ -136,8 +162,12 @@ class Transaction(object):
         if inputs and not isinstance(inputs, list):
             raise TypeError("`inputs` must be a list instance or None")
 
-        if metadata is not None and not isinstance(metadata, dict):
-            raise TypeError("`metadata` must be a dict or None")
+        if metadata is not None and not isinstance(metadata, str):
+            # Add CID validation
+            raise TypeError("`metadata` must be a CID string or None")
+
+        if script is not None and not isinstance(script, dict):
+            raise TypeError("`script` must be a dict or None")
 
         self.version = version if version is not None else self.VERSION
         self.operation = operation
@@ -145,8 +175,35 @@ class Transaction(object):
         self.inputs = inputs or []
         self.outputs = outputs or []
         self.metadata = metadata
+        self.script = script
         self._id = hash_id
         self.tx_dict = tx_dict
+
+    def validate(self, planet, current_transactions=[]):
+        """Validate transaction spend
+        Args:
+            planet (Planetmint): an instantiated planetmint.Planetmint object.
+        Returns:
+            The transaction (Transaction) if the transaction is valid else it
+            raises an exception describing the reason why the transaction is
+            invalid.
+        Raises:
+            ValidationError: If the transaction is invalid
+        """
+        input_conditions = []
+
+        if self.operation == Transaction.CREATE:
+            duplicates = any(txn for txn in current_transactions if txn.id == self.id)
+            if planet.is_committed(self.id) or duplicates:
+                raise DuplicateTransaction("transaction `{}` already exists".format(self.id))
+
+            if not self.inputs_valid(input_conditions):
+                raise InvalidSignature("Transaction signature is invalid.")
+
+        elif self.operation == Transaction.TRANSFER:
+            self.validate_transfer_inputs(planet, current_transactions)
+
+        return self
 
     @property
     def unspent_outputs(self):
@@ -320,7 +377,7 @@ class Transaction(object):
         elif isinstance(input_.fulfillment, ThresholdSha256):
             return cls._sign_threshold_signature_fulfillment(input_, message, key_pairs)
         elif isinstance(input_.fulfillment, ZenroomSha256):
-            return cls._sign_threshold_signature_fulfillment(input_, message, key_pairs)
+            return cls._sign_zenroom_fulfillment(input_, message, key_pairs)
         else:
             raise ValueError("Fulfillment couldn't be matched to " "Cryptocondition fulfillment type.")
 
@@ -453,6 +510,10 @@ class Transaction(object):
             return self._inputs_valid(["dummyvalue" for _ in self.inputs])
         elif self.operation == self.TRANSFER:
             return self._inputs_valid([output.fulfillment.condition_uri for output in outputs])
+        elif self.operation == self.VALIDATOR_ELECTION:
+            return self._inputs_valid(["dummyvalue" for _ in self.inputs])
+        elif self.operation == self.CHAIN_MIGRATION_ELECTION:
+            return self._inputs_valid(["dummyvalue" for _ in self.inputs])
         else:
             allowed_ops = ", ".join(self.__class__.ALLOWED_OPERATIONS)
             raise TypeError("`operation` must be one of {}".format(allowed_ops))
@@ -524,7 +585,7 @@ class Transaction(object):
             print(f"Exception ASN1EncodeError : {e}")
             return False
 
-        if operation == self.CREATE:
+        if operation in [self.CREATE, self.CHAIN_MIGRATION_ELECTION, self.VALIDATOR_ELECTION]:
             # NOTE: In the case of a `CREATE` transaction, the
             #       output is always valid.
             output_valid = True
@@ -533,7 +594,10 @@ class Transaction(object):
 
         ffill_valid = False
         if isinstance(parsed_ffill, ZenroomSha256):
-            ffill_valid = parsed_ffill.validate(message=message)
+            import json
+
+            msg = json.loads(message)
+            ffill_valid = parsed_ffill.validate(message=json.dumps(msg["script"]))
         else:
             message = sha3_256(message.encode())
             if input_.fulfills:
@@ -558,7 +622,7 @@ class Transaction(object):
         Returns:
             dict: The Transaction as an alternative serialization format.
         """
-        return {
+        tx_dict = {
             "inputs": [input_.to_dict() for input_ in self.inputs],
             "outputs": [output.to_dict() for output in self.outputs],
             "operation": str(self.operation),
@@ -567,6 +631,9 @@ class Transaction(object):
             "version": self.version,
             "id": self._id,
         }
+        if self.script:
+            tx_dict["script"] = self.script
+        return tx_dict
 
     @staticmethod
     # TODO: Remove `_dict` prefix of variable.
@@ -637,7 +704,9 @@ class Transaction(object):
             transactions = [transactions]
 
         # create a set of the transactions' asset ids
-        asset_ids = {tx.id if tx.operation == tx.CREATE else tx.asset["id"] for tx in transactions}
+        asset_ids = {
+            tx.id if tx.operation in [tx.CREATE, tx.VALIDATOR_ELECTION] else tx.asset["id"] for tx in transactions
+        }
 
         # check that all the transasctions have the same asset id
         if len(asset_ids) > 1:
@@ -699,6 +768,14 @@ class Transaction(object):
             "version": tx["version"],
             "id": id,
         }
+        try:
+            script_ = tx["script"]
+            script_dict = {"script": script_}
+        except KeyError:
+            script_ = None
+            pass
+        else:
+            local_dict = {**local_dict, **script_dict}
 
         if not skip_schema_validation:
             cls.validate_id(local_dict)
@@ -715,6 +792,7 @@ class Transaction(object):
             tx["version"],
             hash_id=tx["id"],
             tx_dict=tx,
+            script=script_,
         )
 
     @classmethod
@@ -782,7 +860,11 @@ class Transaction(object):
 
     @classmethod
     def validate_schema(cls, tx):
-        pass
+        validate_transaction_schema(tx)
+        validate_txn_obj(cls.ASSET, tx[cls.ASSET], cls.DATA, validate_key)
+        validate_txn_obj(cls.METADATA, tx, cls.METADATA, validate_key)
+        validate_language_key(tx[cls.ASSET], cls.DATA)
+        validate_language_key(tx, cls.METADATA)
 
     def validate_transfer_inputs(self, planet, current_transactions=[]):
         # store the inputs so that we can check if the asset ids match
@@ -831,3 +913,22 @@ class Transaction(object):
             raise InvalidSignature("Transaction signature is invalid.")
 
         return True
+
+    @classmethod
+    def complete_tx_i_o(self, tx_signers, recipients):
+        inputs = []
+        outputs = []
+
+        # generate_outputs
+        for recipient in recipients:
+            if not isinstance(recipient, tuple) or len(recipient) != 2:
+                raise ValueError(
+                    ("Each `recipient` in the list must be a" " tuple of `([<list of public keys>]," " <amount>)`")
+                )
+            pub_keys, amount = recipient
+            outputs.append(Output.generate(pub_keys, amount))
+
+        # generate inputs
+        inputs.append(Input.generate(tx_signers))
+
+        return (inputs, outputs)

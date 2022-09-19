@@ -7,6 +7,7 @@ from cryptoconditions.types.zenroom import ZenroomSha256
 from zenroom import zencode_exec
 from planetmint_driver import Planetmint
 from planetmint_driver.crypto import generate_keypair
+from ipld import multihash, marshal
 
 
 def test_zenroom_signing(
@@ -15,6 +16,7 @@ def test_zenroom_signing(
     fulfill_script_zencode,
     zenroom_data,
     zenroom_house_assets,
+    zenroom_script_input,
     condition_script_zencode,
 ):
 
@@ -64,10 +66,19 @@ def test_zenroom_signing(
     }
     metadata = {"result": {"output": ["ok"]}}
 
+    script_ = {
+        "code": {"type": "zenroom", "raw": "test_string", "parameters": [{"obj": "1"}, {"obj": "2"}]},  # obsolete
+        "state": "dd8bbd234f9869cab4cc0b84aa660e9b5ef0664559b8375804ee8dce75b10576",  #
+        "input": zenroom_script_input,
+        "output": ["ok"],
+        "policies": {},
+    }
+
     token_creation_tx = {
         "operation": "CREATE",
-        "asset": zenroom_house_assets,
-        "metadata": metadata,
+        "asset": {"data": multihash(marshal({"test": "my asset"}))},
+        "metadata": multihash(marshal(metadata)),
+        "script": script_,
         "outputs": [
             output,
         ],
@@ -79,35 +90,44 @@ def test_zenroom_signing(
     }
 
     # JSON: serialize the transaction-without-id to a json formatted string
-    message = json.dumps(
+    tx = json.dumps(
         token_creation_tx,
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
     )
-
+    script_ = json.dumps(script_)
     # major workflow:
     # we store the fulfill script in the transaction/message (zenroom-sha)
     # the condition script is used to fulfill the transaction and create the signature
     #
     # the server should ick the fulfill script and recreate the zenroom-sha and verify the signature
 
-    message = zenroomscpt.sign(message, condition_script_zencode, alice)
-    assert zenroomscpt.validate(message=message)
+    signed_input = zenroomscpt.sign(script_, condition_script_zencode, alice)
 
-    message = json.loads(message)
+    input_signed = json.loads(signed_input)
+    input_signed["input"]["signature"] = input_signed["output"]["signature"]
+    del input_signed["output"]["signature"]
+    del input_signed["output"]["logs"]
+    input_signed["output"] = ["ok"]  # define expected output that is to be compared
+    input_msg = json.dumps(input_signed)
+
+    assert zenroomscpt.validate(message=input_msg)
+
+    tx = json.loads(tx)
     fulfillment_uri_zen = zenroomscpt.serialize_uri()
 
-    message["inputs"][0]["fulfillment"] = fulfillment_uri_zen
-    tx = message
+    tx["inputs"][0]["fulfillment"] = fulfillment_uri_zen
+    tx["script"] = input_signed
     tx["id"] = None
     json_str_tx = json.dumps(tx, sort_keys=True, skipkeys=False, separators=(",", ":"))
     # SHA3: hash the serialized id-less transaction to generate the id
     shared_creation_txid = sha3_256(json_str_tx.encode()).hexdigest()
-    message["id"] = shared_creation_txid
-
+    tx["id"] = shared_creation_txid
+    # tx = json.dumps(tx)
     # `https://example.com:9984`
+    print(f"TX                \n{tx}")
     plntmnt = Planetmint(os.environ.get("PLANETMINT_ENDPOINT"))
-    sent_transfer_tx = plntmnt.transactions.send_commit(message)
+    sent_transfer_tx = plntmnt.transactions.send_commit(tx)
 
     print(f"\n\nstatus and result : + {sent_transfer_tx}")

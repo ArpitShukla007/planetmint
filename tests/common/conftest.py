@@ -5,6 +5,7 @@
 
 from base58 import b58decode
 import pytest
+from cryptoconditions import ThresholdSha256, Ed25519Sha256
 
 
 USER_PRIVATE_KEY = "8eJ8q9ZQpReWyQT5aFCiwtZ5wDZC4eDnCen88p3tQ6ie"
@@ -22,9 +23,9 @@ CC_FULFILLMENT_URI = (
 )
 CC_CONDITION_URI = "ni:///sha-256;" "eZI5q6j8T_fqv7xMROaei9_tmTMk4S7WR5Kr4onPHV8" "?fpt=ed25519-sha-256&cost=131072"
 
-ASSET_DEFINITION = {"data": {"definition": "Asset definition"}}
+ASSET_DEFINITION = {"data": "QmaozNR7DZHQK1ZcU9p7QdrshMvXqWK6gpu5rmrkPdT3L4"}
 
-DATA = {"msg": "Hello Planetmint!"}
+DATA = "QmaozNR7DZHQK1ZcU9p7QdrshMvXqWK6gpu5rmrkPdT3L4"
 
 
 @pytest.fixture
@@ -69,15 +70,11 @@ def cond_uri():
 
 @pytest.fixture
 def user_Ed25519(user_pub):
-    from cryptoconditions import Ed25519Sha256
-
     return Ed25519Sha256(public_key=b58decode(user_pub))
 
 
 @pytest.fixture
 def user_user2_threshold(user_pub, user2_pub):
-    from cryptoconditions import ThresholdSha256, Ed25519Sha256
-
     user_pub_keys = [user_pub, user2_pub]
     threshold = ThresholdSha256(threshold=len(user_pub_keys))
     for user_pub in user_pub_keys:
@@ -87,8 +84,6 @@ def user_user2_threshold(user_pub, user2_pub):
 
 @pytest.fixture
 def user2_Ed25519(user2_pub):
-    from cryptoconditions import Ed25519Sha256
-
     return Ed25519Sha256(public_key=b58decode(user2_pub))
 
 
@@ -194,11 +189,7 @@ def dummy_transaction():
 @pytest.fixture
 def unfulfilled_transaction():
     return {
-        "asset": {
-            "data": {
-                "msg": "Hello Planetmint!",
-            }
-        },
+        "asset": {"data": "QmaozNR7DZHQK1ZcU9p7QdrshMvXqWK6gpu5rmrkPdT3L4"},
         "id": None,
         "inputs": [
             {
@@ -234,11 +225,7 @@ def unfulfilled_transaction():
 @pytest.fixture
 def fulfilled_transaction():
     return {
-        "asset": {
-            "data": {
-                "msg": "Hello Planetmint!",
-            }
-        },
+        "asset": {"data": "QmaozNR7DZHQK1ZcU9p7QdrshMvXqWK6gpu5rmrkPdT3L4"},
         "id": None,
         "inputs": [
             {
@@ -297,11 +284,7 @@ def fulfilled_transaction():
 )
 def tri_state_transaction(request):
     tx = {
-        "asset": {
-            "data": {
-                "msg": "Hello Planetmint!",
-            }
-        },
+        "asset": {"data": "QmaozNR7DZHQK1ZcU9p7QdrshMvXqWK6gpu5rmrkPdT3L4"},
         "id": None,
         "inputs": [
             {"fulfillment": None, "fulfills": None, "owners_before": ["JEAkEJqLbbgDRAtMm8YAjGp759Aq2qTn9eaEHUj2XePE"]}
